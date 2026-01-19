@@ -5,7 +5,7 @@ description: Recursive reasoning with Obsidian vault context for complex project
 
 # Shad (Shannon's Daemon)
 
-Shad enables AI to utilize virtually unlimited context by loading Obsidian vaults with curated knowledge.
+Shad enables AI to utilize virtually unlimited context by treating an Obsidian vault as an explorable environment rather than a fixed input.
 
 ## When to Use This Skill
 
@@ -15,17 +15,34 @@ Shad enables AI to utilize virtually unlimited context by loading Obsidian vault
 - Generating code that follows specific architectural patterns
 - Tasks requiring reasoning over many documents
 
+## Core Premise
+
+> **Long-context reasoning is an inference problem, not a prompting problem.**
+
+Instead of cramming context into a single prompt, Shad:
+1. **Decomposes** complex tasks into subtasks recursively
+2. **Retrieves** targeted context for each subtask via Code Mode
+3. **Generates** outputs informed by relevant examples
+4. **Assembles** results into coherent output
+
 ## Quick Start
 
 ```bash
 # Basic task with vault context
 shad run "Your task" --vault ~/YourVault
 
+# Or set OBSIDIAN_VAULT_PATH and omit --vault
+export OBSIDIAN_VAULT_PATH=~/YourVault
+shad run "Your task"
+
 # Build software with verification
 shad run "Build a REST API" --vault ~/DevDocs --strategy software --verify strict --write-files --output ./api
 
 # Research task
 shad run "Summarize key concepts" --vault ~/Research --strategy research
+
+# Multi-vault (priority order)
+shad run "Build auth system" --vault ~/Project --vault ~/Patterns --vault ~/Docs
 ```
 
 ## Core Commands
@@ -36,21 +53,30 @@ shad run "Summarize key concepts" --vault ~/Research --strategy research
 shad run "Task description" --vault /path/to/vault [options]
 
 Options:
-  --vault, -v       Path to Obsidian vault (repeatable)
+  --vault, -v       Path to Obsidian vault (optional if OBSIDIAN_VAULT_PATH set; repeatable)
   --strategy        Force strategy: software|research|analysis|planning
   --max-depth, -d   Maximum recursion depth (default: 3)
+  --max-nodes       Maximum DAG nodes (default: 50)
+  --max-time, -t    Maximum wall time seconds (default: 300)
+  --max-tokens      Maximum token budget (default: 100000)
   --verify          Verification level: off|basic|build|strict
   --write-files     Write output files to disk
   --output, -o      Output directory
+  --profile         Sandbox profile: strict|local|extended
+  --no-code-mode    Disable Code Mode (direct search only)
+  --no-cache        Bypass cache
+  --no-checkpoints  Disable non-safety checkpoints
 ```
 
 ### Managing Runs
 
 ```bash
-shad status <run_id>           # Check run status
-shad trace tree <run_id>       # View execution DAG
-shad resume <run_id>           # Resume partial run
-shad export <run_id> -o ./out  # Export files
+shad status <run_id>                  # Check run status
+shad trace tree <run_id>              # View execution DAG
+shad trace node <run_id> <node_id>    # Inspect specific node
+shad resume <run_id>                  # Resume partial run
+shad resume <run_id> --replay stale   # Replay stale nodes
+shad export <run_id> -o ./out         # Export files
 ```
 
 ### Vault Ingestion
@@ -59,7 +85,7 @@ shad export <run_id> -o ./out  # Export files
 # Ingest GitHub repos
 shad ingest github https://github.com/org/repo --preset docs --vault ~/Vault
 
-# Presets: mirror (all), docs (documentation), deep (with code)
+# Presets: mirror (all files), docs (documentation), deep (with semantic index)
 ```
 
 ### Sources Scheduler
@@ -92,12 +118,22 @@ shad server logs -f  # Follow logs
 
 ## How Shad Works
 
-1. **Strategy Selection**: Chooses decomposition approach (software, research, analysis)
-2. **Decomposition**: Breaks task into subtasks using strategy skeletons
-3. **Code Mode**: LLM generates Python scripts to retrieve vault context
-4. **Execution**: Runs retrieval scripts in sandboxed environment
-5. **Verification**: Checks syntax, types, imports based on strictness
-6. **Synthesis**: Combines subtask results into coherent output
+```
+shad run "Build app" --vault ~/MyVault
+         |
+         v
+    RLM Engine
+         |
+         +-- Strategy Selection -> Decomposition (DAG of subtasks)
+         |
+         +-- For each node:
+         |     Code Mode -> CodeExecutor -> ObsidianTools -> Vault
+         |                  (sandboxed)
+         |
+         +-- Verification Layer (syntax, types, imports)
+         |
+         +-- Synthesis -> File Manifest
+```
 
 ## Strategies
 
@@ -113,9 +149,29 @@ shad server logs -f  # Follow logs
 | Level | Checks | Use When |
 |-------|--------|----------|
 | `off` | None | Quick iteration |
-| `basic` | Imports + syntax | Default |
+| `basic` | Imports + syntax + manifest | Default |
 | `build` | + Type checking | Pre-commit |
 | `strict` | + Tests | Production |
+
+## Sandbox Profiles
+
+| Profile | File Access | Network | Use Case |
+|---------|-------------|---------|----------|
+| `strict` (default) | Vault only via ObsidianTools | None | Safe, deterministic |
+| `local` | + Read-only allowlisted paths | None | Reference local repos |
+| `extended` | + Read-only allowlist | HTTP GET to allowlist | Fetch live docs |
+
+## Hard Invariants
+
+1. **Never Auto-Publish**: No irreversible side effects without human approval
+2. **Never Exfiltrate**: No sending data externally unless explicitly permitted
+3. **Never Self-Modify**: Cannot change own Skills/CORE without human review
+
+## Configuration
+
+Environment variables (or `.env` file):
+- `OBSIDIAN_VAULT_PATH`: Default vault path (CLI `--vault` overrides)
+- `REDIS_URL`: Redis connection (default: `redis://localhost:6379/0`)
 
 ## Vault Preparation Tips
 
@@ -124,19 +180,21 @@ For best results, your vault should include:
 **For Software Development:**
 - Framework documentation (Markdown)
 - Code examples with explanations
-- Architecture patterns
+- Architecture decision records
+- Common patterns and anti-patterns
 - Team coding standards
 
 **For Research:**
 - Paper summaries
 - Key quotes with citations
 - Concept explanations
+- Related work connections
 
 **General Tips:**
-- Use consistent frontmatter
+- Use consistent frontmatter for better filtering
+- Include code examples with context, not just snippets
+- Link related notes for better discovery
 - Keep notes focused (one concept per note)
-- Link related notes
-- Include worked examples
 
 ## Example Workflows
 

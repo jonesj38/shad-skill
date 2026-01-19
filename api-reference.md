@@ -20,31 +20,40 @@ Execute a reasoning task with vault context.
 curl -X POST http://localhost:8000/v1/run \
   -H "Content-Type: application/json" \
   -d '{
-    "task": "Build a login form",
-    "vaults": ["/home/user/DevVault"],
+    "goal": "Build a REST API for user management",
+    "vaults": [
+      {"id": "project", "root": "/vaults/proj", "priority": 0},
+      {"id": "patterns", "root": "/vaults/patterns", "priority": 1}
+    ],
     "strategy": "software",
-    "max_depth": 3,
-    "verify": "basic"
+    "config": {
+      "max_depth": 4,
+      "max_tokens": 100000,
+      "verify": "basic"
+    },
+    "write_files": false,
+    "profile": "strict"
   }'
 ```
 
 **Request Body:**
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `task` | string | Yes | Task description |
-| `vaults` | string[] | Yes | Vault paths (priority order) |
-| `strategy` | string | No | Force strategy |
-| `max_depth` | int | No | Max recursion depth (default: 3) |
-| `max_nodes` | int | No | Max DAG nodes (default: 50) |
-| `max_time` | int | No | Max wall time seconds (default: 300) |
-| `verify` | string | No | Verification level |
-| `code_mode` | bool | No | Enable Code Mode (default: true) |
+| `goal` | string | Yes | Task description |
+| `vaults` | object[] | Yes | Vault configs with id, root, priority |
+| `strategy` | string | No | Force strategy (software\|research\|analysis\|planning) |
+| `config.max_depth` | int | No | Max recursion depth (default: 3) |
+| `config.max_nodes` | int | No | Max DAG nodes (default: 50) |
+| `config.max_tokens` | int | No | Max token budget (default: 100000) |
+| `config.verify` | string | No | Verification level (off\|basic\|build\|strict) |
+| `write_files` | bool | No | Write output files to disk (default: false) |
+| `profile` | string | No | Sandbox profile (strict\|local\|extended) |
 
 **Response:**
 ```json
 {
   "run_id": "abc123",
-  "status": "running"
+  "status": "RUNNING"
 }
 ```
 
@@ -64,26 +73,40 @@ curl http://localhost:8000/v1/run/abc123
 ```json
 {
   "run_id": "abc123",
-  "status": "complete",
-  "task": "Build a login form",
-  "strategy": "software",
+  "status": "SUCCESS",
   "result": "...",
-  "files": [...],
+  "manifest": {
+    "files": [
+      {
+        "path": "src/types.ts",
+        "content": "export interface User { ... }",
+        "language": "ts",
+        "mode": "create",
+        "hash": "sha256:...",
+        "source_nodes": ["types_contracts"]
+      }
+    ],
+    "notes": [
+      {"kind": "contract_change_request", "detail": "Add UserRole enum"}
+    ]
+  },
   "metrics": {
-    "nodes_executed": 12,
-    "tokens_used": 45000,
-    "duration_seconds": 120
+    "total_tokens": 45000,
+    "duration_ms": 120000,
+    "nodes_executed": 23
   }
 }
 ```
 
-**Status Values:**
-- `pending` - Not started
-- `running` - In progress
-- `complete` - Finished successfully
-- `partial` - Partially complete (resumable)
-- `failed` - Failed with error
-- `aborted` - Manually stopped
+**Run States:**
+| State | Description |
+|-------|-------------|
+| `PENDING` | Not started |
+| `RUNNING` | In progress |
+| `SUCCESS` | Finished successfully, meets acceptance criteria |
+| `PARTIAL` | Produced artifacts but did not meet criteria |
+| `FAILED` | Could not produce meaningful artifacts or safety stop |
+| `NEEDS_HUMAN` | Paused, awaiting human input |
 
 ---
 
@@ -91,7 +114,7 @@ curl http://localhost:8000/v1/run/abc123
 
 **POST /v1/run/:id/resume**
 
-Resume a partial or failed run.
+Resume a partial or paused run.
 
 ```bash
 curl -X POST http://localhost:8000/v1/run/abc123/resume \
@@ -104,7 +127,7 @@ curl -X POST http://localhost:8000/v1/run/abc123/resume \
 **Request Body:**
 | Field | Type | Description |
 |-------|------|-------------|
-| `replay` | string | Nodes to replay: `stale`, `all`, or specific node ID |
+| `replay` | string | Nodes to replay: `stale`, `all`, `subtree:<node_id>`, or specific node ID |
 
 ---
 
@@ -178,6 +201,18 @@ curl "http://localhost:8000/v1/vault/search?q=authentication&limit=10"
 
 ---
 
+### Health Check
+
+**GET /v1/health**
+
+Check API health status.
+
+```bash
+curl http://localhost:8000/v1/health
+```
+
+---
+
 ## Error Responses
 
 All endpoints return errors in this format:
@@ -216,5 +251,20 @@ ws://localhost:8000/v1/run/:id/stream
 {"type": "node_completed", "node_id": "...", "result": "..."}
 {"type": "retrieval", "node_id": "...", "confidence": 0.8}
 {"type": "verification", "check": "syntax", "passed": true}
-{"type": "run_complete", "status": "complete"}
+{"type": "run_complete", "status": "SUCCESS"}
 ```
+
+---
+
+## DAG Node States
+
+Nodes in the execution DAG can have the following states:
+
+| State | Description |
+|-------|-------------|
+| `CREATED` | Node exists but not started |
+| `STARTED` | Execution in progress |
+| `SUCCEEDED` | Completed successfully |
+| `CACHE_HIT` | Result retrieved from cache |
+| `FAILED` | Execution failed |
+| `PRUNED` | Skipped (novelty check or budget) |

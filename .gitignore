@@ -22,3 +22,6 @@ Thumbs.db
 # Local testing
 .test/
 .local/
+
+#Claude
+CLAUDE.md
